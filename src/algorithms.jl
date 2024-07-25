@@ -120,6 +120,24 @@ function Lanczos(;
     return Lanczos(orth, krylovdim, maxiter, tol, eager, verbosity)
 end
 
+struct BlockLanczos{O<:Orthogonalizer,S<:Real} <: KrylovAlgorithm
+    orth::O
+    krylovdim::Int
+    maxiter::Int
+    tol::S
+    eager::Bool
+    verbosity::Int
+end
+function BlockLanczos(;
+                 krylovdim::Int=KrylovDefaults.krylovdim,
+                 maxiter::Int=KrylovDefaults.maxiter,
+                 tol::Real=KrylovDefaults.tol,
+                 orth::Orthogonalizer=KrylovDefaults.orth,
+                 eager::Bool=false,
+                 verbosity::Int=0)
+    return Lanczos(orth, krylovdim, maxiter, tol, eager, verbosity)
+end
+
 """
     GKL(; krylovdim = KrylovDefaults.krylovdim, maxiter = KrylovDefaults.maxiter,
         tol = KrylovDefaults.tol, orth = KrylovDefaults.orth, verbosity = 0)
