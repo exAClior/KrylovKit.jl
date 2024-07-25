@@ -1,30 +1,3 @@
-function RandomUnitaryMatrix(N::Int)
-    # from https://discourse.julialang.org/t/how-to-generate-a-random-unitary-matrix-perfectly-in-julia/34102
-    x = (rand(N,N) + rand(N,N)*im) / sqrt(2)
-    f = qr(x)
-    diagR = sign.(real(diag(f.R)))
-    diagR[diagR.==0] .= 1
-    diagRm = diagm(diagR)
-    u = f.Q * diagRm
-    return u
-end
-
-function degenerate_hamiltonian(dim, degeneracy)
-    eigs = sort(randn(dim - degeneracy +1))
-    eigs = Diagonal([eigs[1] * ones(degeneracy-1); eigs])
-    U = RandomUnitaryMatrix(dim)
-    return U' * eigs* U 
-end
-
-
-h = degenerate_hamiltonian(30,4)
-
-evals_kk = real.(eigsolve(h,rand(eltype(h),size(h,1)), 10, :SR, Lanczos())[1])
-evals_la = real.(eigvals(h))
-
-@show sort(evals_kk)
-@show sort(evals_la)
-
 @testset "Lanczos - eigsolve full ($mode)" for mode in (:vector, :inplace, :outplace)
     scalartypes = mode === :vector ? (Float32, Float64, ComplexF32, ComplexF64) :
                   (ComplexF64,)
