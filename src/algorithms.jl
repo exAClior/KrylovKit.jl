@@ -122,7 +122,7 @@ end
 
 struct BlockLanczos{O<:Orthogonalizer,S<:Real} <: KrylovAlgorithm
     orth::O
-    krylovdim::Int
+    krylovdim::Int # s which s × p <= n is the krylovdim
     maxiter::Int
     tol::S
     eager::Bool
@@ -135,7 +135,7 @@ function BlockLanczos(;
                  orth::Orthogonalizer=KrylovDefaults.orth,
                  eager::Bool=false,
                  verbosity::Int=0)
-    return Lanczos(orth, krylovdim, maxiter, tol, eager, verbosity)
+    return BlockLanczos(orth, krylovdim, maxiter, tol, eager, verbosity)
 end
 
 """

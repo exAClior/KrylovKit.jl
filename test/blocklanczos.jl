@@ -33,14 +33,12 @@ h = degenerate_hamiltonian(30,4)
 @show sort(evals_kk)
 @show sort(evals_la)
 
-function eigsovle(A,p::Int, alg::BlockLanczos)
+function eigsovle(A, X0, howmany, which, alg::BlockLanczos)
     A = h 
-    p = 5
-    n = size(A,1)
-    r = n ÷ p
-    r * p == n || throw(ArgumentError("The number of blocks must divide the size of the matrix"))
+    n, p = size(X0)
+    @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
 
-    Xs = Matrix{eltype(A)}[]
+    Xs = Matrix{eltype(A)}[X0]
     Ms = Matrix{eltype(A)}[]
     Bs = Matrix{eltype(A)}[]
     push!(Xs,(qr(rand(eltype(A), n,n)).Q)[:,1:p])
@@ -59,5 +57,6 @@ function eigsovle(A,p::Int, alg::BlockLanczos)
 end
 
 function SchwartzAlgo(Ms, Bs)
+    # implement this https://doi.org/10.1007/BF02162505
     return T_k
 end
