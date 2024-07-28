@@ -3,6 +3,7 @@ using KrylovKit
 using InteractiveUtils
 using KrylovKit: BlockLanczos
 using SparseArrays
+using BenchmarkTools
 
 function randomUnitaryMatrix(N::Int)
     # from https://discourse.julialang.org/t/how-to-generate-a-random-unitary-matrix-perfectly-in-julia/34102
@@ -23,10 +24,36 @@ function degenerate_hamiltonian(dim, degeneracy)
 end
 
 using Yao
-2^7
-h = degenerate_hamiltonian(2^7, 4)
+function toric_code_strings(m::Int, n::Int)
+	li = LinearIndices((m, n))
+	bottom(i, j) = li[mod1(i, m), mod1(j, n)] + m * n
+	right(i, j) = li[mod1(i, m), mod1(j, n)]
+	xstrings = Vector{Int}[]
+	zstrings = Vector{Int}[]
+	for i=1:m, j=1:n
+		# face center
+		push!(xstrings, [bottom(i, j-1), right(i, j), bottom(i, j), right(i-1, j)])
+		# cross
+		push!(zstrings, [right(i, j), bottom(i, j), right(i, j+1), bottom(i+1, j)])
+	end
+	return xstrings, zstrings
+end
 
-p = 2^4 
-X0 = sparse(qr(rand(eltype(h), size(h))).Q)[:, 1:p]
+function toric_code_hamiltonian(m::Int, n::Int)
+	xstrings, zstrings = toric_code_strings(m, n)
+	sum([kron(2m*n, [i=>X for i in xs]...) for xs in xstrings[1:end-1]]) + sum([kron(2m*n, [i=>Z for i in zs]...) for zs in zstrings[1:end-1]])
+end
 
-T̃ = eigsolve(h, X0, 10, :SR, BlockLanczos(; krylovdim=6))
+# p = 2^4 
+# h = toric_code_hamiltonian(3, 3)
+# X0 = (qr(sprand(eltype(mat(h)), size(mat(h),1),2^-10)).Q)[:, 1:p]
+# evals = eigsolve(-mat(h), X0, 10, :SR, BlockLanczos(; krylovdim=6))
+
+p = 2^2 
+h = degenerate_hamiltonian(2^6, 4)
+X0 = (qr(sprand(eltype(h), size(h,1),2^-2)).Q)[:, 1:p]
+
+evals = eigsolve(h, X0, 10, :SR, BlockLanczos(; krylovdim=6))
+
+sort(evals)
+sort(real.(eigvals(Matrix(h))))

@@ -196,19 +196,24 @@ function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::Block
     @assert r * p == n "The size of the initial matrix X0 is not compatible with the block size p"
     @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
 
-    Xs = Matrix{eltype(A)}[X0]
-    Ms = Matrix{eltype(A)}[]
-    Bs = Matrix{eltype(A)}[]
-    push!(Ms, Xs[end]' * A * Xs[end])
-    for k in 1:(r-1)
-        R_k = A * Xs[k] - Xs[k] * Ms[k] - (k == 1 ? zeros(eltype(A),n,p) : Xs[k-1] * Bs[k-1]')
+    Xprev = spzeros(eltype(A), n,p)
+    Ms = Matrix{eltype(A)}[] # could be 
+    Bs = Matrix{eltype(A)}[] # upper triangular
+
+    push!(Ms, X0' * A * X0)
+
+    @inbounds for k in 1:(r - 1)
+        R_k = A * X0 - X0 * Ms[k] -
+              (k == 1 ? spzeros(eltype(A), n, p) : Xprev * Bs[k - 1]')
         X_kp1, B_k = qr(R_k)
-        push!(Xs, X_kp1[:,1:p])
+        Xprev = X0
+        X0 = X_kp1[:,1:p]
         push!(Bs, B_k)
-        push!(Ms, X_kp1[:,1:p]' * A * X_kp1[:,1:p])
+        push!(Ms, X0' * A * X0)
     end
 
-    T̃ = tri_diag_sym_band_mtx(Ms,Bs)
+
+    T̃ = tri_diag_sym_band_mtx(Ms, Bs)
 
     return eigvals(T̃)
 end
