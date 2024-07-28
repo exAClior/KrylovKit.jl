@@ -23,6 +23,7 @@ module KrylovKit
 using VectorInterface
 using VectorInterface: add!!
 using LinearAlgebra
+using SparseArrays
 using Printf
 using GPUArraysCore
 using PackageExtensionCompat

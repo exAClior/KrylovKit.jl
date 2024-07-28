@@ -156,3 +156,59 @@ function eigsolve(A, x₀, howmany::Int, which::Selector, alg::Lanczos;
            vectors,
            ConvergenceInfo(converged, residuals, normresiduals, numiter, numops)
 end
+
+function tri_diag_sym_band_mtx(Ms::AbstractVector{T}, Bs::AbstractVector{T}) where {T}
+    # implement this https://doi.org/10.1007/BF02162505
+    T̃ = spzeros(eltype(T), size(Ms[1]) .* length(Ms))
+    n = size(T̃, 1)
+    m = size(Ms[1], 1)  # because M[i] and B[i] are upper triangular
+    @inbounds for idx in eachindex(Ms)
+        T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 1) * m):(idx * m)] = Ms[idx]
+        if idx > 1
+            T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 2) * m):((idx - 1) * m)] = Bs[idx - 1]
+        end
+        if idx < length(Ms)
+            T̃[(1 + (idx - 1) * m):(idx * m), (1 + idx * m):((idx + 1) * m)] = Bs[idx]'
+        end
+    end
+
+    @inbounds for jj in 1:(n - 2) # eliminating elements in col jj
+        for kk in min(m, n - jj):-1:2 # eliminating element in row kk
+            grot, _ = givens(T̃, jj + kk - 1, jj + kk, jj)
+            T̃ = grot * T̃ * grot'
+            droptol!(T̃, 1e-15)
+            jj + kk + m > n && continue
+            for μ in 1:floor(Int, (n - kk - jj) / m)
+                grot, _ = givens(T̃, jj + kk + μ * m - 1, jj + kk + μ * m,
+                                 jj + kk + (μ - 1) * m - 1)
+                T̃ = grot * T̃ * grot'
+                droptol!(T̃, 1e-15)
+            end
+        end
+    end
+    # return Tridiagonal(T̃) 
+    return SymTridiagonal(Vector(real.(diag(T̃))), Vector(abs.(diag(T̃, 1))))
+end
+
+function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
+    n, p = size(X0)
+    r = n ÷ p
+    @assert r * p == n "The size of the initial matrix X0 is not compatible with the block size p"
+    @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
+
+    Xs = Matrix{eltype(A)}[X0]
+    Ms = Matrix{eltype(A)}[]
+    Bs = Matrix{eltype(A)}[]
+    push!(Ms, Xs[end]' * A * Xs[end])
+    for k in 1:(r-1)
+        R_k = A * Xs[k] - Xs[k] * Ms[k] - (k == 1 ? zeros(eltype(A),n,p) : Xs[k-1] * Bs[k-1]')
+        X_kp1, B_k = qr(R_k)
+        push!(Xs, X_kp1[:,1:p])
+        push!(Bs, B_k)
+        push!(Ms, X_kp1[:,1:p]' * A * X_kp1[:,1:p])
+    end
+
+    T̃ = tri_diag_sym_band_mtx(Ms,Bs)
+
+    return eigvals(T̃)
+end
