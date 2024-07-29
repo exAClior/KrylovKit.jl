@@ -164,14 +164,15 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
         for kk in min(m, n - jj):-1:2 # eliminating element in row kk
             grot, _ = givens(T̃, jj + kk - 1, jj + kk, jj)
             T̃ = grot * T̃ * grot'
-            droptol!(T̃, 1e-15)
+            # droptol!(T̃, 1e-15)
             jj + kk + m > n && continue
             for μ in 1:floor(Int, (n - kk - jj) / m)
                 grot, _ = givens(T̃, jj + kk + μ * m - 1, jj + kk + μ * m,
                                  jj + kk + (μ - 1) * m - 1)
                 T̃ = grot * T̃ * grot'
-                droptol!(T̃, 1e-15)
+                # droptol!(T̃, 1e-15)
             end
+            droptol!(T̃, 1e-15)
         end
     end
     # return Tridiagonal(T̃) 
@@ -179,29 +180,27 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
 
 end
 
-function block_tridiagonalize(A::AbstractMatrix{T},X0) where T
-    n,p = size(X0)
-    r = n ÷ p
-    @assert r * p == n "The size of the initial matrix X0 is not compatible with the block size p"
+function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
+    n,p = size(X1)
 
-    Xprev = spzeros(eltype(A), n,p)
+    Xprev = spzeros(eltype(X1), n,p)
 
-    Ms = Matrix{eltype(A)}[] # could be 
-    Bs = Matrix{eltype(A)}[] # upper triangular
+    Ms = SparseMatrixCSC{eltype(X1),Int}[] # could be 
+    Bs = SparseMatrixCSC{eltype(X1),Int}[] # upper triangular
 
-    push!(Ms, X0' * A * X0)
+    push!(Ms, X1' * A * X1)
 
     @inbounds for k in 1:(r - 1)
-        R_k = A * X0 - X0 * Ms[k] -
-              (k == 1 ? spzeros(eltype(A), n, p) : Xprev * Bs[k - 1]')
+        R_k = A * X1 - X1 * Ms[k] -
+              (k == 1 ? spzeros(eltype(X1), n, p) : Xprev * Bs[k - 1]')
         X_kp1, B_k = qr(R_k)
-        Xprev = X0
-        X0 = X_kp1[:,1:p]
+        Xprev = X1
+        X1 = X_kp1[:,1:p]
         push!(Bs, B_k)
-        push!(Ms, X0' * A * X0)
+        push!(Ms, X1' * A * X1)
     end
 
-    T̃ = spzeros(eltype(T), size(Ms[1]) .* length(Ms))
+    T̃ = spzeros(eltype(X1), size(Ms[1]) .* length(Ms))
     m = size(Ms[1], 1)  # because M[i] and B[i] are upper triangular
     @inbounds for idx in eachindex(Ms)
         T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 1) * m):(idx * m)] = Ms[idx]
@@ -218,9 +217,10 @@ end
 function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
     n, p = size(X0)
     @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
-    T̃ = block_tridiagonalize(A, X0)
+    T̃ = block_tridiagonalize(A, X0, alg.krylovdim)
 
     T̃ = tridiag_sym_band_mtx(T̃, p)
+    @show "me use julia eigen function"
 
-    return eigvals(T̃)
+    return sort(eigvals(T̃))[1:howmany]
 end
