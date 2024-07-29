@@ -157,21 +157,9 @@ function eigsolve(A, x₀, howmany::Int, which::Selector, alg::Lanczos;
            ConvergenceInfo(converged, residuals, normresiduals, numiter, numops)
 end
 
-function tri_diag_sym_band_mtx(Ms::AbstractVector{T}, Bs::AbstractVector{T}) where {T}
+function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
     # implement this https://doi.org/10.1007/BF02162505
-    T̃ = spzeros(eltype(T), size(Ms[1]) .* length(Ms))
     n = size(T̃, 1)
-    m = size(Ms[1], 1)  # because M[i] and B[i] are upper triangular
-    @inbounds for idx in eachindex(Ms)
-        T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 1) * m):(idx * m)] = Ms[idx]
-        if idx > 1
-            T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 2) * m):((idx - 1) * m)] = Bs[idx - 1]
-        end
-        if idx < length(Ms)
-            T̃[(1 + (idx - 1) * m):(idx * m), (1 + idx * m):((idx + 1) * m)] = Bs[idx]'
-        end
-    end
-
     @inbounds for jj in 1:(n - 2) # eliminating elements in col jj
         for kk in min(m, n - jj):-1:2 # eliminating element in row kk
             grot, _ = givens(T̃, jj + kk - 1, jj + kk, jj)
@@ -188,15 +176,16 @@ function tri_diag_sym_band_mtx(Ms::AbstractVector{T}, Bs::AbstractVector{T}) whe
     end
     # return Tridiagonal(T̃) 
     return SymTridiagonal(Vector(real.(diag(T̃))), Vector(abs.(diag(T̃, 1))))
+
 end
 
-function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
-    n, p = size(X0)
+function block_tridiagonalize(A::AbstractMatrix{T},X0) where T
+    n,p = size(X0)
     r = n ÷ p
     @assert r * p == n "The size of the initial matrix X0 is not compatible with the block size p"
-    @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
 
     Xprev = spzeros(eltype(A), n,p)
+
     Ms = Matrix{eltype(A)}[] # could be 
     Bs = Matrix{eltype(A)}[] # upper triangular
 
@@ -212,8 +201,26 @@ function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::Block
         push!(Ms, X0' * A * X0)
     end
 
+    T̃ = spzeros(eltype(T), size(Ms[1]) .* length(Ms))
+    m = size(Ms[1], 1)  # because M[i] and B[i] are upper triangular
+    @inbounds for idx in eachindex(Ms)
+        T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 1) * m):(idx * m)] = Ms[idx]
+        if idx > 1
+            T̃[(1 + (idx - 1) * m):(idx * m), (1 + (idx - 2) * m):((idx - 1) * m)] = Bs[idx - 1]
+        end
+        if idx < length(Ms)
+            T̃[(1 + (idx - 1) * m):(idx * m), (1 + idx * m):((idx + 1) * m)] = Bs[idx]'
+        end
+    end
+    return T̃
+end
 
-    T̃ = tri_diag_sym_band_mtx(Ms, Bs)
+function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
+    n, p = size(X0)
+    @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
+    T̃ = block_tridiagonalize(A, X0)
+
+    T̃ = tridiag_sym_band_mtx(T̃, p)
 
     return eigvals(T̃)
 end
