@@ -157,6 +157,18 @@ function eigsolve(A, x₀, howmany::Int, which::Selector, alg::Lanczos;
            ConvergenceInfo(converged, residuals, normresiduals, numiter, numops)
 end
 
+"""
+    tridiag_sym_band_mtx(T̃::AbstractMatrix{T}, m::Int) where {T}
+
+Tridiagonalize a band tridiagonal matrix T̃.
+
+# Arguments
+- `T̃::AbstractMatrix{T}`: The input tridiagonal symmetric band matrix from which to construct the tridiagonal matrix.
+- `m::Int`: The bandwidth of the resulting tridiagonal symmetric band matrix.
+
+# Returns
+A tridiagonal symmetric matrix.
+"""
 function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
     # implement this https://doi.org/10.1007/BF02162505
     n = size(T̃, 1)
@@ -164,22 +176,36 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
         for kk in min(m, n - jj):-1:2 # eliminating element in row kk
             grot, _ = givens(T̃, jj + kk - 1, jj + kk, jj)
             T̃ = grot * T̃ * grot'
-            # droptol!(T̃, 1e-15)
             jj + kk + m > n && continue
+            # eliminating element that deviates from tridiagonal symmetric band matrix
             for μ in 1:floor(Int, (n - kk - jj) / m)
                 grot, _ = givens(T̃, jj + kk + μ * m - 1, jj + kk + μ * m,
                                  jj + kk + (μ - 1) * m - 1)
                 T̃ = grot * T̃ * grot'
-                # droptol!(T̃, 1e-15)
             end
             droptol!(T̃, 1e-15)
         end
     end
-    # return Tridiagonal(T̃) 
+    # obtain symmetric tridiagonal matrix that has the same 
+    # eigenvalues as the hermitian tridiaonal matrix 
+    # https://en.wikipedia.org/wiki/Tridiagonal_matrix#Similarity_to_symmetric_tridiagonal_matrix
+    # this is valid, tested in smaller dimension
     return SymTridiagonal(Vector(real.(diag(T̃))), Vector(abs.(diag(T̃, 1))))
-
 end
 
+"""
+    block_tridiagonalize(A::AbstractMatrix{T}, X1, r)
+
+Block tridiagonalize a matrix `A` using the Block Lanczos algorithm.
+
+# Arguments
+- `A::AbstractMatrix{T}`: The matrix to be block tridiagonalized.
+- `X1`: The initial block vector.
+- `r::Int`: The number of iterations of Lanczos.
+
+# Returns
+- `T`: The block tridiagonal matrix.
+"""
 function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
     n,p = size(X1)
 
@@ -190,6 +216,7 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
 
     push!(Ms, X1' * A * X1)
 
+    # iterations to construct Krylov subspace and its QR decomposition iteratively 
     @inbounds for k in 1:(r - 1)
         R_k = A * X1 - X1 * Ms[k] -
               (k == 1 ? spzeros(eltype(X1), n, p) : Xprev * Bs[k - 1]')
@@ -200,6 +227,7 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
         push!(Ms, X1' * A * X1)
     end
 
+    # construct the block tridiagonal matrix from blocks vector
     T̃ = spzeros(eltype(X1), size(Ms[1]) .* length(Ms))
     m = size(Ms[1], 1)  # because M[i] and B[i] are upper triangular
     @inbounds for idx in eachindex(Ms)
@@ -217,10 +245,9 @@ end
 function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
     n, p = size(X0)
     @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
+
     T̃ = block_tridiagonalize(A, X0, alg.krylovdim)
 
     T̃ = tridiag_sym_band_mtx(T̃, p)
-    @show "me use julia eigen function"
-
     return sort(eigvals(T̃))[1:howmany]
 end
