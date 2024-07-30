@@ -183,7 +183,7 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
                                  jj + kk + (μ - 1) * m - 1)
                 T̃ = grot * T̃ * grot'
             end
-            droptol!(T̃, 1e-15)
+            droptol!(T̃, 1e-16)
         end
     end
     # obtain symmetric tridiagonal matrix that has the same 
