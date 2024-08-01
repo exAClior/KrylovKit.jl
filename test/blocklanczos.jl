@@ -20,7 +20,7 @@ function degenerate_hamiltonian(dim, degeneracy)
     eigs = sort(randn(dim - degeneracy + 1))
     eigs = spdiagm([eigs[1] * ones(degeneracy - 1); eigs])
     U = randomUnitaryMatrix(dim)
-    return sparse(U' * eigs * U)
+    return sparse(U' * eigs * U), eigs
 end
 
 using Yao
@@ -44,33 +44,27 @@ function toric_code_hamiltonian(m::Int, n::Int)
 	sum([kron(2m*n, [i=>X for i in xs]...) for xs in xstrings[1:end-1]]) + sum([kron(2m*n, [i=>Z for i in zs]...) for zs in zstrings[1:end-1]])
 end
 
-# number of orthogonal vectors in a block matrix
-p = 2^3 
-
+using Random
+Random.seed!(1234)
+k = 10
+p = Int(exp2(ceil(log2(k))))
+krylovdim = 20
 h = mat(toric_code_hamiltonian(3, 3))
-
-# randomly generated initial block matrix used to create Krylov subspace
-# X0 = hcat(x₁,x₂,...,xₚ),  xᵢ'*xⱼ = δ(i,j)
-X0 = (qr(sprandn(eltype(h), size(h,1),2^-3)).Q)[:, 1:p] 
-
-evals = eigsolve(-h, X0, 10, :SR, BlockLanczos(; krylovdim=18));
-evals2,_ = eigsolve(-h, randn(size(h,1)), 10, :SR, Lanczos(;krylovdim=30));
-
+X0 = (qr(sprandn(eltype(h), size(h,1),2^-3)).Q)[:, 1:p]
+evals = eigsolve(-h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
+evals2,_ = eigsolve(-h, randn(size(h,1)), k, :SR, Lanczos(;krylovdim=30));
 evals # does to give me exactly the degeneracy but close
 evals2
 
 
-p = 2^2
-h = degenerate_hamiltonian(2^8, 4)
+
+k = 10
+p = Int(exp2(ceil(log2(k))))
+krylovdim = 20
+h, true_eigs = degenerate_hamiltonian(2^10, 4)
 X0 = (qr(sprand(eltype(h), size(h,1),2^-4)).Q)[:, 1:p]
 
-@time evals = eigsolve(h, X0, 10, :SR, BlockLanczos(; krylovdim=10));
-@time evals2,_ = eigsolve(h, randn(size(h,1)), 10, :SR, Lanczos(;krylovdim=30));
-
-
-T̃_block = KrylovKit.block_tridiagonalize(h, X0, 10)
-T̃_tri = KrylovKit.tridiag_sym_band_mtx(T̃_block, p) 
-
-evals_block = sort(real.(eigvals(Matrix(T̃_block))))
-evals_tri = eigvals(T̃_tri)
-@assert evals_block ≈ evals_tri
+evals = eigsolve(h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
+evals2,_ = eigsolve(h, randn(size(h,1)), 10, :SR, Lanczos(;krylovdim=30));
+evals - sort(diag(true_eigs))[1:k]
+evals2

@@ -211,13 +211,14 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
 
     Xprev = spzeros(eltype(X1), n,p)
 
-    Ms = SparseMatrixCSC{eltype(X1),Int}[] # could be 
-    Bs = SparseMatrixCSC{eltype(X1),Int}[] # upper triangular
+    Ms = SparseMatrixCSC{eltype(X1),Int}[]
+    Bs = SparseMatrixCSC{eltype(X1),Int}[] # could be made upper triangular
 
-    push!(Ms, X1' * A * X1)
+    push!(Ms, X1' * A * X1) # 
 
     # iterations to construct Krylov subspace and its QR decomposition iteratively 
     @inbounds for k in 1:(r - 1)
+        @assert X1' * X1 ≈ I "X1 is not orthonormal"
         R_k = A * X1 - X1 * Ms[k] -
               (k == 1 ? spzeros(eltype(X1), n, p) : Xprev * Bs[k - 1]')
         X_kp1, B_k = qr(R_k)
