@@ -48,7 +48,7 @@ using Random
 Random.seed!(1234)
 k = 10
 p = Int(exp2(ceil(log2(k))))
-krylovdim = 20
+krylovdim = 30
 h = mat(toric_code_hamiltonian(3, 3))
 X0 = (qr(sprandn(eltype(h), size(h,1),2^-3)).Q)[:, 1:p]
 evals = eigsolve(-h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
@@ -68,3 +68,5 @@ evals = eigsolve(h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
 evals2,_ = eigsolve(h, randn(size(h,1)), 10, :SR, Lanczos(;krylovdim=30));
 evals - sort(diag(true_eigs))[1:k]
 evals2
+
+# orthogonality of X_i https://www.cas.mcmaster.ca/~qiao/publications/spie05.pdf, https://apps.dtic.mil/sti/pdfs/ADA224011.pdf

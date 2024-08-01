@@ -223,7 +223,7 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
               (k == 1 ? spzeros(eltype(X1), n, p) : Xprev * Bs[k - 1]')
         X_kp1, B_k = qr(R_k)
         Xprev = X1
-        X1 = X_kp1[:,1:p]
+        X1 = Matrix(X_kp1) # maybe not first p? lost of orthogonality here
         push!(Bs, B_k)
         push!(Ms, X1' * A * X1)
     end
