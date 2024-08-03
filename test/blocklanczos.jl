@@ -46,11 +46,11 @@ end
 
 using Random
 Random.seed!(1234)
-k = 10
+k = 5 
 p = Int(exp2(ceil(log2(k))))
 krylovdim = 30
 h = mat(toric_code_hamiltonian(3, 3))
-X0 = (qr(sprandn(eltype(h), size(h,1),2^-3)).Q)[:, 1:p]
+X0 = (qr(randn(eltype(h), size(h,1))).Q)[:, 1:p]
 evals = eigsolve(-h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
 evals2,_ = eigsolve(-h, randn(size(h,1)), k, :SR, Lanczos(;krylovdim=30));
 evals # does to give me exactly the degeneracy but close
@@ -66,6 +66,7 @@ X0 = (qr(sprand(eltype(h), size(h,1),2^-4)).Q)[:, 1:p]
 
 evals = eigsolve(h, X0, k, :SR, BlockLanczos(; krylovdim=krylovdim));
 evals2,_ = eigsolve(h, randn(size(h,1)), 10, :SR, Lanczos(;krylovdim=30));
+evals
 evals - sort(diag(true_eigs))[1:k]
 evals2
 

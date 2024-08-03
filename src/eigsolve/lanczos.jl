@@ -183,7 +183,6 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
                                  jj + kk + (μ - 1) * m - 1)
                 T̃ = grot * T̃ * grot'
             end
-            droptol!(T̃, 1e-16)
         end
     end
     # obtain symmetric tridiagonal matrix that has the same 
@@ -192,6 +191,32 @@ function tridiag_sym_band_mtx(T̃::AbstractMatrix{T},m::Int) where {T}
     # this is valid, tested in smaller dimension
     return SymTridiagonal(Vector(real.(diag(T̃))), Vector(abs.(diag(T̃, 1))))
 end
+
+_dot(::Nothing, b) = b
+_dot(A::AbstractMatrix, b) = A*b
+
+# https://github.com/SciML/ExponentialUtilities.jl/issues/32
+function icgs!(A::AbstractMatrix, j, M=nothing; alpha=0.5, maxit=3)
+    u = @view A[:,j]
+    Q = @view A[:,1:j-1]
+    Mu = _dot(M, u)
+    r_pre = sqrt(abs(dot(u, Mu)))
+    local r1
+    for it = 1:maxit
+        u .-= Q * (Q' * Mu)
+        Mu = _dot(M, u)
+        r1 = sqrt(abs(dot(u, Mu)))
+        if r1 > alpha * r_pre
+            break
+        end
+        r_pre = r1
+    end
+    normalize!(A[:,j])
+    if r1 <= alpha * r_pre
+        @warn "loss of orthogonality @icgs."
+    end
+end
+
 
 """
     block_tridiagonalize(A::AbstractMatrix{T}, X1, r)
@@ -209,23 +234,25 @@ Block tridiagonalize a matrix `A` using the Block Lanczos algorithm.
 function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
     n,p = size(X1)
 
-    Xprev = spzeros(eltype(X1), n,p)
-
-    Ms = SparseMatrixCSC{eltype(X1),Int}[]
-    Bs = SparseMatrixCSC{eltype(X1),Int}[] # could be made upper triangular
-
-    push!(Ms, X1' * A * X1) # 
+    Xs = zeros(eltype(X1),n,(1+r)*p) 
+    Xs[:,p+1:2*p] = X1
+    Ms = Matrix{eltype(X1)}[]
+    Bs = Matrix{eltype(X1)}[] # could be made upper triangular
 
     # iterations to construct Krylov subspace and its QR decomposition iteratively 
-    @inbounds for k in 1:(r - 1)
-        @assert X1' * X1 ≈ I "X1 is not orthonormal"
-        R_k = A * X1 - X1 * Ms[k] -
-              (k == 1 ? spzeros(eltype(X1), n, p) : Xprev * Bs[k - 1]')
-        X_kp1, B_k = qr(R_k)
-        Xprev = X1
-        X1 = Matrix(X_kp1) # maybe not first p? lost of orthogonality here
-        push!(Bs, B_k)
-        push!(Ms, X1' * A * X1)
+    for i in 1:(r - 1)
+        U_i = A * Xs[:, (i * p + 1):((i + 1) * p)] - (i == 1 ? spzeros(eltype(X1), n, p) :
+                                                      Xs[:, ((i - 1) * p + 1):(i * p)] * Bs[end]')
+        M_i = Xs[:, (i * p + 1):((i + 1) * p)]' * U_i
+        R_i = U_i - Xs[:, (i * p + 1):((i + 1) * p)] * M_i
+        F = qr(R_i)
+        X_i, B_i = Matrix(F.Q), F.R
+        push!(Ms, M_i)
+        push!(Bs, B_i)
+        Xs[:, ((i + 1) * p + 1):((i + 2) * p)] = X_i
+        for j in collect(((i + 1) * p + 1):((i + 2) * p))
+            icgs!(Xs,j)
+        end
     end
 
     # construct the block tridiagonal matrix from blocks vector
@@ -251,39 +278,4 @@ function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::Block
 
     T̃ = tridiag_sym_band_mtx(T̃, p)
     return sort(eigvals(T̃))[1:howmany]
-end
-
-function icgs(u::Vector{T}, Q::Matrix{T}, M::Union{Matrix{T}, Nothing}=nothing, maxiter::Int=3) where T
-    """
-    Iterative Classical M-orthogonal Gram-Schmidt orthogonalization.
-
-    Parameters:
-        u::Vector{T}: the column vector to be orthogonalized.
-        Q::Matrix{T}: the search space.
-        M::Union{Matrix{T}, Nothing}: the matrix, if provided, perform M-orthogonal.
-        return_norm::Bool: return the norm of u.
-        maxiter::Int: the maximum number of iterations.
-
-    Return:
-        Vector{T}, orthogonalized vector u.
-    """
-    @assert ndims(u) == 2
-    uH, QH = u', Q'
-    alpha = 0.5
-    it = 1
-    Mu = isnothing(M) ? u : M * u
-    r_pre = norm(uH * Mu)
-    for it in 1:maxiter
-        u = u - Q * (QH * Mu)
-        Mu = isnothing(M) ? u : M * u
-        r1 = norm(uH * Mu)
-        if r1 > alpha * r_pre
-            break
-        end
-        r_pre = r1
-    end
-    if r1 <= alpha * r_pre
-        @warn "loss of orthogonality @icgs."
-    end
-    return u, r1
 end
