@@ -252,3 +252,38 @@ function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::Block
     T̃ = tridiag_sym_band_mtx(T̃, p)
     return sort(eigvals(T̃))[1:howmany]
 end
+
+function icgs(u::Vector{T}, Q::Matrix{T}, M::Union{Matrix{T}, Nothing}=nothing, maxiter::Int=3) where T
+    """
+    Iterative Classical M-orthogonal Gram-Schmidt orthogonalization.
+
+    Parameters:
+        u::Vector{T}: the column vector to be orthogonalized.
+        Q::Matrix{T}: the search space.
+        M::Union{Matrix{T}, Nothing}: the matrix, if provided, perform M-orthogonal.
+        return_norm::Bool: return the norm of u.
+        maxiter::Int: the maximum number of iterations.
+
+    Return:
+        Vector{T}, orthogonalized vector u.
+    """
+    @assert ndims(u) == 2
+    uH, QH = u', Q'
+    alpha = 0.5
+    it = 1
+    Mu = isnothing(M) ? u : M * u
+    r_pre = norm(uH * Mu)
+    for it in 1:maxiter
+        u = u - Q * (QH * Mu)
+        Mu = isnothing(M) ? u : M * u
+        r1 = norm(uH * Mu)
+        if r1 > alpha * r_pre
+            break
+        end
+        r_pre = r1
+    end
+    if r1 <= alpha * r_pre
+        @warn "loss of orthogonality @icgs."
+    end
+    return u, r1
+end
