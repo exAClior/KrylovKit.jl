@@ -1,4 +1,15 @@
 # lanczos.jl
+mutable struct BlockLanczosFactorization{T,S<:Real} <: KrylovFactorization{T,S}
+    k::Int # current Krylov dimension
+    V::OrthonormalBasis{T} # basis of length k
+    # Block Tridiagonal matrix is 
+    # 551 of Golub
+    αs::Vector{AbstractMatrix{S}} 
+    βs::Vector{AbstractMatrix{S}}
+    # not sure what is the residual
+    r::T
+end
+
 """
     mutable struct LanczosFactorization{T,S<:Real} <: KrylovFactorization{T,S}
 
@@ -54,7 +65,11 @@ end
 rayleighquotient(F::LanczosFactorization) = SymTridiagonal(F.αs, F.βs)
 residual(F::LanczosFactorization) = F.r
 @inbounds normres(F::LanczosFactorization) = F.βs[F.k]
-rayleighextension(F::LanczosFactorization) = SimpleBasisVector(F.k, F.k)
+rayleighextension(F::Union{LanczosFactorization,BlockLanczosFactorization}) = SimpleBasisVector(F.k, F.k)
+
+struct BlockLanczosIterator{F,T,O<:Orthogonalizer} <: KrylovIterator{F,T}
+
+end
 
 # Lanczos iteration for constructing the orthonormal basis of a Krylov subspace.
 """
