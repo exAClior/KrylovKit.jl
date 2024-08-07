@@ -1,14 +1,43 @@
 # lanczos.jl
-mutable struct BlockLanczosFactorization{T,S<:Real} <: KrylovFactorization{T,S}
+mutable struct BlockLanczosFactorization{T,P,S<:Real} <: KrylovFactorization{T,S} 
     k::Int # current Krylov dimension
     V::OrthonormalBasis{T} # basis of length k
     # Block Tridiagonal matrix is 
     # 551 of Golub
-    αs::Vector{AbstractMatrix{S}} 
+    αs::Vector{AbstractMatrix{S}}  #vector of P x P matrices
     βs::Vector{AbstractMatrix{S}}
     # not sure what is the residual
     r::T
 end
+
+Base.sizehint!(F::BlockLanczosFactorization{T,P,S},n) where {T,P,S} = begin
+    sizehint!(F.V, n*P)
+    sizehint!(F.αs, n)
+    sizehint!(F.βs, n)
+    return F
+end
+
+# perhaps generate code via meta programming?
+Base.eltype(::Type{<:BlockLanczosFactorization{<:Any,S}}) where {S} = S
+
+Base.length(F::BlockLanczosFactorization) = F.k
+Base.sizehint!(F::BlockLanczosFactorization, n) = begin
+    sizehint!(F.V, n)
+    sizehint!(F.αs, n)
+    sizehint!(F.βs, n)
+    return F
+end
+Base.eltype(F::BlockLanczosFactorization) = eltype(typeof(F))
+Base.eltype(::Type{<:BlockLanczosFactorization{<:Any,S}}) where {S} = S
+
+function basis(F::BlockLanczosFactorization)
+    return length(F.V) == F.k ? F.V :
+           error("Not keeping vectors during Lanczos factorization")
+end
+rayleighquotient(F::BlockLanczosFactorization) = SymTridiagonal(F.αs, F.βs)
+residual(F::BlockLanczosFactorization) = F.r
+@inbounds normres(F::BlockLanczosFactorization) = F.βs[F.k]
+rayleighextension(F::BlockLanczosFactorization) = SimpleBasisVector(F.k, F.k)
 
 """
     mutable struct LanczosFactorization{T,S<:Real} <: KrylovFactorization{T,S}
@@ -65,11 +94,235 @@ end
 rayleighquotient(F::LanczosFactorization) = SymTridiagonal(F.αs, F.βs)
 residual(F::LanczosFactorization) = F.r
 @inbounds normres(F::LanczosFactorization) = F.βs[F.k]
-rayleighextension(F::Union{LanczosFactorization,BlockLanczosFactorization}) = SimpleBasisVector(F.k, F.k)
+rayleighextension(F::LanczosFactorization) = SimpleBasisVector(F.k, F.k)
 
 struct BlockLanczosIterator{F,T,O<:Orthogonalizer} <: KrylovIterator{F,T}
-
+    operator::F
+    X₀::T
+    orth::O
+    keepvecs::Bool
+    function BlockLanczosIterator{F,T,O}(operator::F,
+                                    X₀::T,
+                                    orth::O,
+                                    keepvecs::Bool) where {F,T,O<:Orthogonalizer}
+        if !keepvecs && isa(orth, Reorthogonalizer)
+            error("Cannot use reorthogonalization without keeping all Krylov vectors")
+        end
+        return new{F,T,O}(operator, X₀, orth, keepvecs)
+    end
 end
+
+function BlockLanczosIterator(operator::F,
+                         X₀::T,
+                         orth::O=KrylovDefaults.orth,
+                         keepvecs::Bool=true) where {F,T,O<:Orthogonalizer}
+    return BlockLanczosIterator{F,T,O}(operator, X₀, orth, keepvecs)
+end
+
+Base.IteratorSize(::Type{<:BlockLanczosIterator}) = Base.SizeUnknown()
+Base.IteratorEltype(::Type{<:BlockLanczosIterator}) = Base.EltypeUnknown()
+
+function Base.iterate(iter::BlockLanczosIterator)
+    state = initialize(iter)
+    return state, state
+end
+
+function Base.iterate(iter::BlockLanczosIterator, state::BlockLanczosFactorization)
+    nr = normres(state)
+    if nr < eps(typeof(nr))
+        return nothing
+    else
+        state = expand!(iter, deepcopy(state))
+        return state, state
+    end
+end
+
+function initialize(iter::BlockLanczosIterator; verbosity::Int=0)
+    # initialize without using eltype
+    X₀ = iter.X₀
+
+    # what does these correspond to ?
+    # β₀ = norm(x₀)
+    # iszero(β₀) && throw(ArgumentError("initial vector should not have norm zero"))
+
+    AX₀ = stack(apply.(Ref(iter.operator), eachcol(X₀)))
+
+    # α = inner(X₀, AX₀) / (β₀ * β₀)
+    # T = typeof(α)
+
+    # this line determines the vector type that we will henceforth use
+    V = OrthonormalBasis([X₀])
+    αs = [α]
+    βs = [zero(T)]
+    r = add!!(AX₀, X₀, -α) # should we use real(α) here?
+    β = norm(r)
+    # possibly reorthogonalize
+    if iter.orth isa Union{ClassicalGramSchmidt2,ModifiedGramSchmidt2}
+        dα = inner(X₀, r)
+        α += dα
+        r = add!!(r, X₀, -dα) # should we use real(dα) here?
+        β = norm(r)
+    elseif iter.orth isa Union{ClassicalGramSchmidtIR,ModifiedGramSchmidtIR}
+        while eps(one(β)) < β < iter.orth.η * β₀
+            dα = inner(X₀, r)
+            α += dα
+            r = add!!(r, X₀, -dα) # should we use real(dα) here?
+            β = norm(r)
+        end
+    end
+    αs = [real(α)]
+    βs = [β]
+    if verbosity > 0
+        @info "Block Lanczos iteration step 1: normres = $β"
+    end
+    return BlockLanczosFactorization(1, V, αs, βs, r)
+end
+
+function initialize!(iter::BlockLanczosIterator, state::BlockLanczosFactorization;verbosity::Int=0)
+    X₀ = iter.X₀
+    V = state.V
+    while length(V) > 1
+        pop!(V)
+    end
+    αs = empty!(state.αs)
+    βs = empty!(state.βs)
+
+    V[1] = scale!!(V[1], x₀, 1 / norm(x₀))
+    w = apply(iter.operator, V[1])
+    r, α = orthogonalize!!(w, V[1], iter.orth)
+    β = norm(r)
+    warn_nonhermitian(α, zero(β), β)
+
+    state.k = 1
+    push!(αs, real(α))
+    push!(βs, β)
+    state.r = r
+    if verbosity > 0
+        @info "Lanczos iteration step 1: normres = $β"
+    end
+    return state
+end
+
+function expand!(iter::BlockLanczosIterator, state::BlockLanczosFactorization; verbosity::Int=0)
+    βold = normres(state)
+    V = state.V
+    r = state.r
+    V = push!(V, scale!!(r, 1 / βold))
+    r, α, β = lanczosrecurrence(iter.operator, V, βold, iter.orth)
+    warn_nonhermitian(α, βold, β)
+
+    αs = push!(state.αs, real(α))
+    βs = push!(state.βs, β)
+
+    !iter.keepvecs && popfirst!(state.V) # remove oldest V if not keepvecs
+
+    state.k += 1
+    state.r = r
+    if verbosity > 0
+        @info "Lanczos iteration step $(state.k): normres = $β"
+    end
+    return state
+end
+function shrink!(state::BlockLanczosFactorization, k)
+    length(state) == length(state.V) ||
+        error("we cannot shrink LanczosFactorization without keeping Lanczos vectors")
+    length(state) <= k && return state
+    V = state.V
+    while length(V) > k + 1
+        pop!(V)
+    end
+    r = pop!(V)
+    resize!(state.αs, k)
+    resize!(state.βs, k)
+    state.k = k
+    state.r = scale!!(r, normres(state))
+    return state
+end
+# Exploit hermiticity to "simplify" orthonormalization process:
+# Lanczos three-term recurrence relation
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ClassicalGramSchmidt)
+    v = V[end]
+    w = apply(operator, v)
+    α = inner(v, w)
+    w = add!!(w, V[end - 1], -β)
+    w = add!!(w, v, -α)
+    β = norm(w)
+    return w, α, β
+end
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ModifiedGramSchmidt)
+    v = V[end]
+    w = apply(operator, v)
+    w = add!!(w, V[end - 1], -β)
+    α = inner(v, w)
+    w = add!!(w, v, -α)
+    β = norm(w)
+    return w, α, β
+end
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ClassicalGramSchmidt2)
+    v = V[end]
+    w = apply(operator, v)
+    α = inner(v, w)
+    w = add!!(w, V[end - 1], -β)
+    w = add!!(w, v, -α)
+
+    w, s = orthogonalize!!(w, V, ClassicalGramSchmidt())
+    α += s[end]
+    β = norm(w)
+    return w, α, β
+end
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ModifiedGramSchmidt2)
+    v = V[end]
+    w = apply(operator, v)
+    w = add!!(w, V[end - 1], -β)
+    w, α = orthogonalize!!(w, v, ModifiedGramSchmidt())
+
+    s = α
+    for q in V
+        w, s = orthogonalize!!(w, q, ModifiedGramSchmidt())
+    end
+    α += s
+    β = norm(w)
+    return w, α, β
+end
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ClassicalGramSchmidtIR)
+    v = V[end]
+    w = apply(operator, v)
+    α = inner(v, w)
+    w = add!!(w, V[end - 1], -β)
+    w = add!!(w, v, -α)
+
+    ab2 = abs2(α) + abs2(β)
+    β = norm(w)
+    nold = sqrt(abs2(β) + ab2)
+    while eps(one(β)) < β < orth.η * nold
+        nold = β
+        w, s = orthogonalize!!(w, V, ClassicalGramSchmidt())
+        α += s[end]
+        β = norm(w)
+    end
+    return w, α, β
+end
+function lanczosrecurrence(operator, V::OrthonormalBasis, β, orth::ModifiedGramSchmidtIR)
+    v = V[end]
+    w = apply(operator, v)
+    w = add!!(w, V[end - 1], -β)
+
+    w, α = orthogonalize!!(w, v, ModifiedGramSchmidt())
+    ab2 = abs2(α) + abs2(β)
+    β = norm(w)
+    nold = sqrt(abs2(β) + ab2)
+    while eps(one(β)) < β < orth.η * nold
+        nold = β
+        s = zero(α)
+        for q in V
+            w, s = orthogonalize!!(w, q, ModifiedGramSchmidt())
+        end
+        α += s
+        β = norm(w)
+    end
+    return w, α, β
+end
+
 
 # Lanczos iteration for constructing the orthonormal basis of a Krylov subspace.
 """

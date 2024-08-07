@@ -4,6 +4,24 @@ using InteractiveUtils
 using KrylovKit: BlockLanczos
 using SparseArrays
 using BenchmarkTools
+using KrylovKit: BlockLanczosIterator
+
+N = 100
+k = 3 
+p = Int(exp2(ceil(log2(k))))
+krylovdim = 10 
+h = randn(ComplexF64,N,N) 
+h += h'
+X0 = (qr(sprand(eltype(h), size(h,1),2^-4)).Q)[:, 1:p]
+
+iter = BlockLanczosIterator(h,X0)
+X₀= iter.X₀
+X₀[:,1]
+eachcol(X₀)[1]
+stack(KrylovKit.apply.(Ref(iter.operator), eachcol(X₀)))
+# fact = initialize(iter)
+
+
 
 function randomUnitaryMatrix(N::Int)
     # from https://discourse.julialang.org/t/how-to-generate-a-random-unitary-matrix-perfectly-in-julia/34102
