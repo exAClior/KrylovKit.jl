@@ -1,43 +1,33 @@
 # lanczos.jl
-mutable struct BlockLanczosFactorization{T,P,S<:Real} <: KrylovFactorization{T,S} 
+mutable struct BlockLanczosFactorization{T,S<:Number} <: KrylovFactorization{T,S} 
     k::Int # current Krylov dimension
     V::OrthonormalBasis{T} # basis of length k
     # Block Tridiagonal matrix is 
     # 551 of Golub
-    αs::Vector{AbstractMatrix{S}}  #vector of P x P matrices
-    βs::Vector{AbstractMatrix{S}}
+    Ms::Vector{<:AbstractMatrix{S}}  #vector of P x P matrices
+    Bs::Vector{<:AbstractMatrix{S}}
     # not sure what is the residual
-    r::T
+    R::AbstractMatrix{S}
 end
 
-Base.sizehint!(F::BlockLanczosFactorization{T,P,S},n) where {T,P,S} = begin
-    sizehint!(F.V, n*P)
-    sizehint!(F.αs, n)
-    sizehint!(F.βs, n)
-    return F
-end
+# Base.length(F::BlockLanczosFactorization) = F.k
+# Base.sizehint!(F::BlockLanczosFactorization, n) = begin
+#     sizehint!(F.V, n)
+#     sizehint!(F.Ms, n)
+#     sizehint!(F.Bs, n)
+#     return F
+# end
+# Base.eltype(F::BlockLanczosFactorization) = eltype(typeof(F))
+# Base.eltype(::Type{<:BlockLanczosFactorization{<:Any,S}}) where {S} = S
 
-# perhaps generate code via meta programming?
-Base.eltype(::Type{<:BlockLanczosFactorization{<:Any,S}}) where {S} = S
-
-Base.length(F::BlockLanczosFactorization) = F.k
-Base.sizehint!(F::BlockLanczosFactorization, n) = begin
-    sizehint!(F.V, n)
-    sizehint!(F.αs, n)
-    sizehint!(F.βs, n)
-    return F
-end
-Base.eltype(F::BlockLanczosFactorization) = eltype(typeof(F))
-Base.eltype(::Type{<:BlockLanczosFactorization{<:Any,S}}) where {S} = S
-
-function basis(F::BlockLanczosFactorization)
-    return length(F.V) == F.k ? F.V :
-           error("Not keeping vectors during Lanczos factorization")
-end
-rayleighquotient(F::BlockLanczosFactorization) = SymTridiagonal(F.αs, F.βs)
-residual(F::BlockLanczosFactorization) = F.r
-@inbounds normres(F::BlockLanczosFactorization) = F.βs[F.k]
-rayleighextension(F::BlockLanczosFactorization) = SimpleBasisVector(F.k, F.k)
+# function basis(F::BlockLanczosFactorization)
+#     return length(F.V) == F.k ? F.V :
+#            error("Not keeping vectors during Lanczos factorization")
+# end
+# rayleighquotient(F::BlockLanczosFactorization) = SymTridiagonal(F.Ms, F.Bs)
+# residual(F::BlockLanczosFactorization) = F.R
+# @inbounds normres(F::BlockLanczosFactorization) = F.Bs[F.k]
+# rayleighextension(F::BlockLanczosFactorization) = SimpleBasisVector(F.k, F.k)
 
 """
     mutable struct LanczosFactorization{T,S<:Real} <: KrylovFactorization{T,S}
@@ -141,41 +131,38 @@ function initialize(iter::BlockLanczosIterator; verbosity::Int=0)
     # initialize without using eltype
     X₀ = iter.X₀
 
-    # what does these correspond to ?
-    # β₀ = norm(x₀)
-    # iszero(β₀) && throw(ArgumentError("initial vector should not have norm zero"))
+    X₀' * X₀ ≈ I || throw(ArgumentError("initial vectors should be orthonormal"))
 
     AX₀ = stack(apply.(Ref(iter.operator), eachcol(X₀)))
 
-    # α = inner(X₀, AX₀) / (β₀ * β₀)
-    # T = typeof(α)
+    M = X₀' * AX₀
+    T = eltype(M)
 
-    # this line determines the vector type that we will henceforth use
-    V = OrthonormalBasis([X₀])
-    αs = [α]
-    βs = [zero(T)]
-    r = add!!(AX₀, X₀, -α) # should we use real(α) here?
-    β = norm(r)
+    V = OrthonormalBasis(Vector.([eachcol(X₀)...]))
+
+    R = AX₀ - X₀ * M
+
     # possibly reorthogonalize
-    if iter.orth isa Union{ClassicalGramSchmidt2,ModifiedGramSchmidt2}
-        dα = inner(X₀, r)
-        α += dα
-        r = add!!(r, X₀, -dα) # should we use real(dα) here?
-        β = norm(r)
-    elseif iter.orth isa Union{ClassicalGramSchmidtIR,ModifiedGramSchmidtIR}
-        while eps(one(β)) < β < iter.orth.η * β₀
-            dα = inner(X₀, r)
-            α += dα
-            r = add!!(r, X₀, -dα) # should we use real(dα) here?
-            β = norm(r)
-        end
-    end
-    αs = [real(α)]
-    βs = [β]
+    # if iter.orth isa Union{ClassicalGramSchmidt2,ModifiedGramSchmidt2}
+    #     dα = inner(X₀, r)
+    #     α += dα
+    #     r = add!!(r, X₀, -dα) # should we use real(dα) here?
+    #     β = norm(r)
+    # elseif iter.orth isa Union{ClassicalGramSchmidtIR,ModifiedGramSchmidtIR}
+    #     while eps(one(β)) < β < iter.orth.η * β₀
+    #         dα = inner(X₀, r)
+    #         α += dα
+    #         r = add!!(r, X₀, -dα) # should we use real(dα) here?
+    #         β = norm(r)
+    #     end
+    # end
+    Ms = [M]
+    Bs = [qr(R).R]
     if verbosity > 0
-        @info "Block Lanczos iteration step 1: normres = $β"
+        @info "Block Lanczos iteration step 1: R = $R"
     end
-    return BlockLanczosFactorization(1, V, αs, βs, r)
+    @show typeof(V), typeof(Ms), typeof(Bs), typeof(R)
+    return BlockLanczosFactorization(size(X₀,2), V, Ms, Bs, R)
 end
 
 function initialize!(iter::BlockLanczosIterator, state::BlockLanczosFactorization;verbosity::Int=0)

@@ -5,6 +5,7 @@ using KrylovKit: BlockLanczos
 using SparseArrays
 using BenchmarkTools
 using KrylovKit: BlockLanczosIterator
+using KrylovKit: OrthonormalBasis
 
 N = 100
 k = 3 
@@ -15,11 +16,7 @@ h += h'
 X0 = (qr(sprand(eltype(h), size(h,1),2^-4)).Q)[:, 1:p]
 
 iter = BlockLanczosIterator(h,X0)
-X₀= iter.X₀
-X₀[:,1]
-eachcol(X₀)[1]
-stack(KrylovKit.apply.(Ref(iter.operator), eachcol(X₀)))
-# fact = initialize(iter)
+fact = initialize(iter)
 
 
 
