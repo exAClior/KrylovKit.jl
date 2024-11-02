@@ -239,7 +239,8 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
     Ms = Matrix{eltype(X1)}[]
     Bs = Matrix{eltype(X1)}[] # could be made upper triangular
 
-    # iterations to construct Krylov subspace and its QR decomposition iteratively 
+    # iterations to construct Krylov subspace and its QR decomposition iteratively
+    # each of this iteration should be moved to initialize and then expand of BlockLanczosIteration and Factorization
     for i in 1:(r - 1)
         U_i = A * Xs[:, (i * p + 1):((i + 1) * p)] - (i == 1 ? spzeros(eltype(X1), n, p) :
                                                       Xs[:, ((i - 1) * p + 1):(i * p)] * Bs[end]')
@@ -270,11 +271,20 @@ function block_tridiagonalize(A::AbstractMatrix{T},X1,r::Int) where T
     return T̃
 end
 
-function eigsolve(A, X0, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
-    n, p = size(X0)
+function eigsolve(A, x₀, howmany::Int, which::Union{Symbol,Selector}, alg::BlockLanczos)
+    krylovdim = alg.krylovdim
+    maxiter = alg.maxiter
+    howmany > krylovdim &&
+        error("krylov dimension $(krylovdim) too small to compute $howmany eigenvalues")
+
+
+    n, p = size(x₀)
     @assert alg.krylovdim * p <= n "Dimension of the Krylov subspace is too large"
 
-    T̃ = block_tridiagonalize(A, X0, alg.krylovdim)
+    iter = LanczosIterator(A, x₀, alg.orth)
+
+
+    T̃ = block_tridiagonalize(A, x₀, alg.krylovdim)
 
     T̃ = tridiag_sym_band_mtx(T̃, p)
     return sort(eigvals(T̃))[1:howmany]
